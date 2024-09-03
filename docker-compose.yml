@@ -1,0 +1,108 @@
+version: '3'
+networks:
+  dawarich:
+services:
+  cloudflared:
+    container_name: dawarich_cloudflared
+    restart: unless-stopped
+    image: cloudflare/cloudflared
+    command: tunnel run
+    environment:
+      - 'TUNNEL_TOKEN=$CLOUDFLARE_TOKEN'
+    networks:
+      - dawarich
+  dawarich_redis:
+    container_name: dawarich_redis
+    image: redis:7.0-alpine
+    command: redis-server
+    networks:
+      - dawarich
+    volumes:
+      - shared_data:/var/shared/redis
+    restart: always
+  dawarich_db:
+    container_name: dawarich_db
+    image: postgres:14.2-alpine
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - shared_data:/var/shared
+    networks:
+      - dawarich
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: $PASSWORD
+    restart: always
+  dawarich_app:
+    container_name: dawarich_app
+    image: freikin/dawarich:latest
+    volumes:
+      - gem_cache:/usr/local/bundle/gems
+      - public:/var/app/public
+    networks:
+      - dawarich
+    ports:
+      - 3000:3000
+    stdin_open: true
+    tty: true
+    entrypoint: dev-entrypoint.sh
+    command: ['bin/dev']
+    restart: on-failure
+    environment:
+      RAILS_ENV: development
+      REDIS_URL: redis://dawarich_redis:6379/0
+      DATABASE_HOST: dawarich_db
+      DATABASE_USERNAME: postgres
+      DATABASE_PASSWORD: $PASSWORD
+      DATABASE_NAME: dawarich_development
+      MIN_MINUTES_SPENT_IN_CITY: 60
+      APPLICATION_HOST: localhost
+      APPLICATION_HOSTS: "localhost,$URL"
+      TIME_ZONE: America/New_York
+      APPLICATION_PROTOCOL: http
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+    depends_on:
+      - dawarich_db
+      - dawarich_redis
+  dawarich_sidekiq:
+    image: freikin/dawarich:latest
+    container_name: dawarich_sidekiq
+    volumes:
+      - gem_cache:/usr/local/bundle/gems
+      - public:/var/app/public
+    networks:
+      - dawarich
+    stdin_open: true
+    tty: true
+    entrypoint: dev-entrypoint.sh
+    command: ['sidekiq']
+    restart: on-failure
+    environment:
+      RAILS_ENV: development
+      REDIS_URL: redis://dawarich_redis:6379/0
+      DATABASE_HOST: dawarich_db
+      DATABASE_USERNAME: postgres
+      DATABASE_PASSWORD: $PASSWORD
+      DATABASE_NAME: dawarich_development
+      APPLICATION_HOST: localhost
+      APPLICATION_HOSTS: "localhost,$URL"
+      BACKGROUND_PROCESSING_CONCURRENCY: 10
+      APPLICATION_PROTOCOL: http
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+    depends_on:
+      - dawarich_db
+      - dawarich_redis
+      - dawarich_app
+
+volumes:
+  db_data:
+  gem_cache:
+  shared_data:
+  public:
